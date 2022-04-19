@@ -1,0 +1,243 @@
+---
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: A CloudFormation template that provides targeted notifications when new AWS Support Cases are created
+Parameters:
+  SlackWebhookURL:
+    Type: String
+    Description: "A Slack 'WorkFlow Builder' Webhook URL. For details: https://slack.com/intl/en-gb/help/articles/360041352714-Create-more-advanced-workflows-using-webhooks"
+    AllowedPattern: "^https://hooks.slack.com/workflows/.*$"
+Resources:
+  EventFanOutSNSTopic:
+    Type: AWS::SNS::Topic
+  EventFanOutSNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action: sns:Publish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Resource: !Ref EventFanOutSNSTopic
+        Version: "2012-10-17"
+      Topics:
+        - !Ref EventFanOutSNSTopic
+  EndUserSubscriptionTopic:
+    Type: AWS::SNS::Topic
+  EventBridgeRuleForAWSSupportActivity:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.support
+        detail-type:
+          - Support Case Update
+      State: ENABLED
+      Targets: 
+        - 
+          Arn: 
+            Ref: EventFanOutSNSTopic
+          Id: "Target0"
+  LambdaFunctionPublishSupportActivityToEndUsers:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.8
+      Role: !GetAtt LambdaFunctionPublishSupportActivityToEndUsersIAMRole.Arn
+      Handler: index.handler
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN_TO_NOTIFY : !Ref EndUserSubscriptionTopic
+      Code:
+        ZipFile: |
+          # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+          # SPDX-License-Identifier: MIT-0
+
+          import os
+          import boto3
+          import json
+
+          SNS_TOPIC_ARN_TO_NOTIFY = os.environ.get("SNS_TOPIC_ARN_TO_NOTIFY")
+
+          sns_client = boto3.client("sns")
+
+          def process_support_activity(activity):
+
+              activity = json.loads(activity["Sns"]["Message"])
+              case_display_id = activity["detail"]["display-id"]
+              support_activity_event_name = activity["detail"]["event-name"]
+
+              support_activity_type = "updated"
+              activity_type_mapping = {
+                  "AddCommunicationToCase": "updated with communications",
+                  "CreateCase": "created",
+                  "ReopenCase": "reopened",
+                  "ResolveCase": "resolved",
+              }
+
+              try:
+                  support_activity_type = activity_type_mapping[support_activity_event_name]
+              except KeyError:
+                  return
+
+              sns_client.publish(
+                  TargetArn=SNS_TOPIC_ARN_TO_NOTIFY,
+                  Subject=f"AWS Support Case ({case_display_id}) was {support_activity_type}",
+                  Message=f"Hello,\n\nThis email is to notify you that an AWS Support Case was {support_activity_type}.\nYou can access the case at the following url: https://console.aws.amazon.com/support/home#/case/?displayId={case_display_id}",
+              )
+
+          def handler(event, context):
+              print(event)
+
+              if "Records" not in event:
+                  return
+
+              for activity in event["Records"]:
+                  process_support_activity(activity)
+  LambdaFunctionPublishSupportActivityToEndUsersIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  LambdaFunctionPublishSupportActivityToEndUsersIAMPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action: sns:Publish
+            Effect: Allow
+            Resource: !Ref EndUserSubscriptionTopic
+        Version: "2012-10-17"
+      PolicyName: LambdaFunctionPublishSupportActivityToEndUsersIAMPolicy
+      Roles: 
+        - !Ref LambdaFunctionPublishSupportActivityToEndUsersIAMRole    
+  LambdaFunctionPublishSupportActivityToEndUsersInvokePermissionsForSNSFanOutTopic:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunctionPublishSupportActivityToEndUsers.Arn
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref EventFanOutSNSTopic
+  LambdaFunctionPublishSupportActivityToEndUsersSubscriptionToSNSFanOutTopic:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      TopicArn: !Ref EventFanOutSNSTopic
+      Endpoint: !GetAtt LambdaFunctionPublishSupportActivityToEndUsers.Arn
+  LambdaFunctionPublishSupportActivityToEndUsersLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${LambdaFunctionPublishSupportActivityToEndUsers}
+      RetentionInDays: 7
+  LambdaFunctionInvokeSlackWebhook:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.8
+      Role: !GetAtt LambdaFunctionInvokeSlackWebhookIAMRole.Arn
+      Handler: index.handler
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL : !Ref SlackWebhookURL
+      Code:
+        ZipFile: |
+          # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+          # SPDX-License-Identifier: MIT-0
+
+          import os
+          import urllib3
+          import json
+
+          SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+          http = urllib3.PoolManager()
+
+          def process_support_activity(activity):
+
+              activity = json.loads(activity["Sns"]["Message"])
+              case_display_id = activity["detail"]["display-id"]
+              support_activity_event_name = activity["detail"]["event-name"]
+
+              support_activity_type = "updated"
+              activity_type_mapping = {
+                  "AddCommunicationToCase": "updated with communications",
+                  "CreateCase": "created",
+                  "ReopenCase": "reopened",
+                  "ResolveCase": "resolved",
+              }
+
+              try:
+                  support_activity_type = activity_type_mapping[support_activity_event_name]
+              except KeyError:
+                  return
+
+              slack_request_body = json.dumps({
+                  "updateDetails": support_activity_type,
+                  "caseId": case_display_id,
+                  "caseUrl": f"https://console.aws.amazon.com/support/home#/case/?displayId={case_display_id}"
+              }).encode("utf-8")
+
+              http.request(
+                  "POST",
+                  SLACK_WEBHOOK_URL,
+                  body=slack_request_body,
+                  headers={"Content-Type": "application/json"}
+              )
+
+          def handler(event, context):
+              print(event)
+
+              if "Records" not in event:
+                  return
+
+              for activity in event["Records"]:
+                  process_support_activity(activity)
+  LambdaFunctionInvokeSlackWebhookIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  LambdaFunctionInvokeSlackWebhookInvokePermissionsForSNSFanOutTopic:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunctionInvokeSlackWebhook.Arn
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref EventFanOutSNSTopic
+  LambdaFunctionInvokeSlackWebhookSubscriptionToSNSFanOutTopic:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      TopicArn: !Ref EventFanOutSNSTopic
+      Endpoint: !GetAtt LambdaFunctionInvokeSlackWebhook.Arn
+  LambdaFunctionInvokeSlackWebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${LambdaFunctionInvokeSlackWebhook}
+      RetentionInDays: 7
