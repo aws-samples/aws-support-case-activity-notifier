@@ -15,13 +15,13 @@ This solution is deployed as an AWS CloudFormation stack that deploys the follow
 1. An SNS topic that interested parties can subscribe to when they want to be notified of support activity taking place in their account.
 1. A Lambda function that initiates a Slack message to notify a Slack Channel that support activity has taken place.
 
-![alttext](images/01-aws-support-case-activity-notifier-solution-overview.png)
+![Solution Overview](images/01-aws-support-case-activity-notifier-solution-overview.png)
 
 The solution works as follows:
 1. A Support Case is created or updated inside of your account.
 1. An Event is put on the EventBridge event bus, and this event is evaluated by EventBridge to determine if there is a matching EventBridge rule.
 1. An EventBridge rule is triggered when the event matches the following pattern:
-![alttext](images/02-aws-support-case-activity-notifier-event-pattern.png)
+![EventBridge rule pattern](images/02-aws-support-case-activity-notifier-event-pattern.png)
 1. The EventBridge rule publishes the event to an SNS Topic.
 5. The SNS Topic triggers two Lambda functions, passing a copy of the event to both functions:
  *  The first Lambda function evaluates the event, and based on whether the event is a ‘Create’ or ‘Update’ event, publishes a user-friendly message to an SNS topic. Users who are subscribed to this SNS topic will receive notifications (for example, Email or SMS)
@@ -54,44 +54,44 @@ A Slack Webhook is an HTTPS URL that will receive an HTTPS Request whenever Supp
 
 First, if you don’t have a Slack Channel in which you would like AWS Support activity to be published, then create a new Slack channel.
 
-![alttext](images/03-aws-support-case-activity-notifier-slack-private-channel.png)
+![Slack - Create a Private Channel](images/03-aws-support-case-activity-notifier-slack-private-channel.png)
 
 From the channel in which you would like AWS Support activity to be published, open the Slack Workflow Builder.
 
-![alttext](images/04-aws-support-case-activity-notifier-slack-created-channel.png)
+![Slack - Newly Created Channel](images/04-aws-support-case-activity-notifier-slack-created-channel.png)
 
-![alttext](images/05-aws-support-case-activity-notifier-slack-open-workflow-builder.png)
+![Slack - Open Workflow Builder](images/05-aws-support-case-activity-notifier-slack-open-workflow-builder.png)
 
 Select the “Create” button, and give your workflow a name.
 
-![alttext](images/06-aws-support-case-activity-notifier-slack-name-workflow.png)
+![Slack - Workflow Builder](images/06-aws-support-case-activity-notifier-slack-name-workflow.png)
 
 Select the “Webhook” option to start this workflow.
 
-![alttext](images/07-aws-support-case-activity-notifier-slack-choose-trigger.png)
+![Slack - Choose Webhook Trigger](images/07-aws-support-case-activity-notifier-slack-choose-trigger.png)
 
 Create 3 variables (`caseId`, `caseUrl`, `updateDetails`), each with a Data Type of “Text”. The variables are case sensitive.
 
-![alttext](images/08-aws-support-case-activity-notifier-slack-set-variables.png)
-![alttext](images/09-aws-support-case-activity-notifier-slack-variable-caseId.png)
-![alttext](images/10-aws-support-case-activity-notifier-slack-variable-caseUrl.png)
-![alttext](images/11-aws-support-case-activity-notifier-slack-variable-updateDetails.png)
+![Slack - Set variables](images/08-aws-support-case-activity-notifier-slack-set-variables.png)
+![Slack - Set caseId variable](images/09-aws-support-case-activity-notifier-slack-variable-caseId.png)
+![Slack - Set caseUrl variable](images/10-aws-support-case-activity-notifier-slack-variable-caseUrl.png)
+![Slack - Set updateDetails variable](images/11-aws-support-case-activity-notifier-slack-variable-updateDetails.png)
 
 Next, add a workflow step to “Send a Message” when the webhook receives a message.
 
-![alttext](images/12-aws-support-case-activity-notifier-slack-add-a-step.png)
-![alttext](images/13-aws-support-case-activity-notifier-slack-send-a-message.png)
+![Slack - Add a workflow step](images/12-aws-support-case-activity-notifier-slack-add-a-step.png)
+![Slack - Add a message step](images/13-aws-support-case-activity-notifier-slack-send-a-message.png)
 
 Select a Slack Channel in which you would like to publish AWS Support activity. You can customize the message that will be sent to the channel according to your own requirements, and insert the three variables created earlier (`caseId`, `caseUrl`, and `updateDetails`).
 
-![alttext](images/14-aws-support-case-activity-notifier-slack-customize-message.png)
+![Slack - Customize the message being sent](images/14-aws-support-case-activity-notifier-slack-customize-message.png)
 
 Select the “Publish” option to create the Webhook. After publishing, copy the Slack Webhook URL, which will be similar to:
 
 `https://hooks.slack.com/workflows/<unique id>`
 
 
-![alttext](images/15-aws-support-case-activity-notifier-slack-publish-webhook.png)
+![Slack - Publish the Webhook](images/15-aws-support-case-activity-notifier-slack-publish-webhook.png)
 
 
 ### Step 2: Deploy this solution using the AWS CLI into the us-east-1 region
@@ -117,31 +117,30 @@ aws cloudformation deploy \
 
 After your CloudFormation stack has been deployed, navigate to the Amazon SNS console, and select the topic containing the name “EndUserSubscriptionToipic”.
 
-![alttext](images/16-aws-support-case-activity-notifier-sns-end-user-topic.png)
+![AWS Console - SNS Console](images/16-aws-support-case-activity-notifier-sns-end-user-topic.png)
 
 Create a subscription to this topic.
-![alttext](images/17-aws-support-case-activity-notifier-sns-view-subscriptions.png)
+![AWS Console - SNS Console - View Subscriptions](images/17-aws-support-case-activity-notifier-sns-view-subscriptions.png)
 
 Select the “Email” Protocol, and enter a destination email address that you would like to notify of AWS Support Case activity.
-![alttext](images/18-aws-support-case-activity-notifier-sns-create-subscription.png)
+![AWS Console - SNS Console - Create Subscription](images/18-aws-support-case-activity-notifier-sns-create-subscription.png)
 
 Check your email, as you must confirm the subscription by selecting the provided link before continuing.
 
-![alttext](images/19-aws-support-case-activity-notifier-sns-confirm-subscription.png)
+![Confirm SNS Subscription](images/19-aws-support-case-activity-notifier-sns-confirm-subscription.png)
 
 ### Step 4: Create a test AWS Support Case to verify that the solution has been implemented
 
 Using the AWS Console, AWS CLI, or APIs, create a new AWS Support Case. For test cases, use the subject `TEST CASE-Please ignore`.
 
-![alttext](images/20-aws-support-case-activity-notifier-create-support-case.png)
+![Create AWS Support Case](images/20-aws-support-case-activity-notifier-create-support-case.png)
 
 After creating the case, you will receive a notification in your Slack channel that a support case was created.
 
-
-![alttext](images/21-aws-support-case-activity-notifier-slack-message-sent.png)
+![Slack - Notification Received](images/21-aws-support-case-activity-notifier-slack-message-sent.png)
 
 Furthermore, you’ll receive an email notification from the SNS topic to which you subscribed.
-![alttext](images/22-aws-support-case-activity-notifier-email-message-sent.png)
+![Email - Notification Received](images/22-aws-support-case-activity-notifier-email-message-sent.png)
 
 
 ## Cleanup
